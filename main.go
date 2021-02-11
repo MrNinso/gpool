@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/urfave/cli/v2"
 )
@@ -64,12 +65,11 @@ func main() {
 	app.Action = func(c *cli.Context) error {
 		logChan := make(chan logStruct)
 		jobChan := make(chan jobStruct)
-		jobsDone := make(chan bool)
-		nJobs := 0
 		workers := c.Int("workers")
 		command := c.String("command")
 		replace := c.String("replace")
 		echo := c.Bool("echo")
+		var w sync.WaitGroup
 
 		go logWorker(logChan, c.Bool("log"))
 
@@ -78,13 +78,13 @@ func main() {
 		}
 
 		for i := 0; i < workers; i++ {
-			go worker(jobChan, jobsDone, logChan)
+			go worker(jobChan, logChan, &w)
 		}
 
 		scanner := bufio.NewScanner(os.Stdin)
 
 		for scanner.Scan() {
-			nJobs++
+			w.Add(1)
 			input := scanner.Text()
 			var in string
 			if strings.Contains(command, replace) {
@@ -106,13 +106,7 @@ func main() {
 			}
 		}
 
-		done := 0
-		for range jobsDone {
-			done++
-			if done == nJobs {
-				break
-			}
-		}
+		w.Wait()
 
 		return nil
 	}
@@ -122,7 +116,7 @@ func main() {
 	}
 }
 
-func worker(jobs <-chan jobStruct, ends chan bool, logChan chan logStruct) {
+func worker(jobs <-chan jobStruct, logChan chan logStruct, w *sync.WaitGroup) {
 	for job := range jobs {
 		cmd := exec.Command(job.command[0], job.command[1:]...)
 
@@ -150,12 +144,10 @@ func worker(jobs <-chan jobStruct, ends chan bool, logChan chan logStruct) {
 		}
 
 		if job.input != "" {
-			fmt.Fprintln(os.Stdout, job.input)
+			go fmt.Fprintln(os.Stdout, job.input)
 		}
 
-		go func() {
-			ends <- true
-		}()
+		w.Done()
 	}
 }
 
