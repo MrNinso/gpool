@@ -15,6 +15,14 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+const (
+	NULL   = 0
+	LOG    = 1
+	STDOUT = 2
+	STDERR = 3
+	PASS   = 4
+)
+
 type logStruct struct {
 	isError bool
 	command []string
@@ -30,12 +38,6 @@ func main() {
 	app := cli.NewApp()
 
 	app.Flags = []cli.Flag{
-		&cli.StringFlag{
-			Name:     "command",
-			Aliases:  []string{"c"},
-			Usage:    "workers command",
-			Required: true,
-		},
 		&cli.IntFlag{
 			Name:    "workers",
 			Aliases: []string{"w"},
@@ -51,7 +53,7 @@ func main() {
 		&cli.BoolFlag{
 			Name:    "log",
 			Aliases: []string{"l"},
-			Usage:   "put all log in STDERR",
+			Usage:   "log in STDERR",
 			Value:   false,
 		},
 		&cli.BoolFlag{
@@ -60,18 +62,45 @@ func main() {
 			Usage:   "echo STDIN",
 			Value:   false,
 		},
+		&cli.BoolFlag{
+			Name:  "to-stdout",
+			Usage: "echo workers STDOUT and STDERR to STDOUT",
+			Value: false,
+		},
+		&cli.BoolFlag{
+			Name:  "to-stderr",
+			Usage: "echo workers STDOUT and STDERR to STDERR",
+			Value: false,
+		},
+		&cli.BoolFlag{
+			Name:  "pass-std",
+			Usage: "echo workers STDOUT and STDERR",
+			Value: false,
+		},
 	}
 
 	app.Action = func(c *cli.Context) error {
 		logChan := make(chan logStruct)
 		jobChan := make(chan jobStruct)
 		workers := c.Int("workers")
-		command := c.String("command")
+		command := c.Args().Slice()
 		replace := c.String("replace")
 		echo := c.Bool("echo")
 		var w sync.WaitGroup
 
-		go logWorker(logChan, c.Bool("log"))
+		logMode := NULL
+
+		if c.Bool("log") {
+			logMode = LOG
+		} else if c.Bool("to-stdout") {
+			logMode = STDOUT
+		} else if c.Bool("to-stderr") {
+			logMode = STDERR
+		} else if c.Bool("pass-std") {
+			logMode = PASS
+		}
+
+		go logWorker(logChan, logMode)
 
 		if workers <= 0 {
 			return errors.New("Must be 1 or more workers")
@@ -86,21 +115,19 @@ func main() {
 		for scanner.Scan() {
 			w.Add(1)
 			input := scanner.Text()
-			var in string
-			if strings.Contains(command, replace) {
-				in = strings.ReplaceAll(command, replace, input)
-			} else {
-				in = fmt.Sprint(command, " ", input)
+			var in []string
+			for _, a := range command {
+				in = append(in, strings.ReplaceAll(a, replace, input))
 			}
 
 			if echo {
 				jobChan <- jobStruct{
-					command: strings.Split(in, " "),
+					command: in,
 					input:   input,
 				}
 			} else {
 				jobChan <- jobStruct{
-					command: strings.Split(in, " "),
+					command: in,
 					input:   "",
 				}
 			}
@@ -131,7 +158,7 @@ func worker(jobs <-chan jobStruct, logChan chan logStruct, w *sync.WaitGroup) {
 			logChan <- logStruct{
 				command: job.command,
 				isError: false,
-				text:    string(o),
+				text:    o,
 			}
 		}
 
@@ -139,25 +166,42 @@ func worker(jobs <-chan jobStruct, logChan chan logStruct, w *sync.WaitGroup) {
 			logChan <- logStruct{
 				command: job.command,
 				isError: true,
-				text:    string(e),
+				text:    e,
 			}
 		}
 
 		if job.input != "" {
-			go fmt.Fprintln(os.Stdout, job.input)
+			go func() {
+				_, _ = fmt.Fprintln(os.Stdout, job.input)
+			}()
 		}
 
 		w.Done()
 	}
 }
 
-func logWorker(logs <-chan logStruct, log bool) {
+func logWorker(logs <-chan logStruct, logMode int) {
 	for l := range logs {
-		if log {
+		//fmt.Println(l, logMode)
+		switch logMode {
+		case LOG:
 			if l.isError {
-				fmt.Fprintf(os.Stderr, "[Erro] %s -> %s", l.command, l.text)
+				_, _ = fmt.Fprintf(os.Stderr, "[Erro] %s -> %s", l.command, l.text)
 			} else {
-				fmt.Fprintf(os.Stderr, "[Info] %s -> %s", l.command, l.text)
+				_, _ = fmt.Fprintf(os.Stderr, "[Info] %s -> %s", l.command, l.text)
+			}
+			break
+		case STDOUT:
+			_, _ = fmt.Fprint(os.Stdout, l.text)
+			break
+		case STDERR:
+			_, _ = fmt.Fprint(os.Stderr, l.text)
+			break
+		case PASS:
+			if l.isError {
+				_, _ = fmt.Fprint(os.Stderr, l.text)
+			} else {
+				_, _ = fmt.Fprintf(os.Stdout, l.text)
 			}
 		}
 	}
