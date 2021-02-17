@@ -100,11 +100,11 @@ func main() {
 			logMode = PASS
 		}
 
-		go logWorker(logChan, logMode)
-
 		if workers <= 0 {
 			return errors.New("Must be 1 or more workers")
 		}
+
+		go logWorker(logChan, logMode)
 
 		for i := 0; i < workers; i++ {
 			go worker(jobChan, logChan, &w)
@@ -132,6 +132,8 @@ func main() {
 				}
 			}
 		}
+
+		close(jobChan)
 
 		w.Wait()
 
@@ -163,10 +165,18 @@ func worker(jobs <-chan jobStruct, logChan chan logStruct, w *sync.WaitGroup) {
 		}
 
 		if e := errb.String(); (e != "" && e != "<nil>") || err != nil {
-			logChan <- logStruct{
-				command: job.command,
-				isError: true,
-				text:    e,
+			if err != nil {
+				logChan <- logStruct{
+					command: job.command,
+					isError: true,
+					text:    fmt.Sprintln(e, err.Error()),
+				}
+			} else {
+				logChan <- logStruct{
+					command: job.command,
+					isError: true,
+					text:    e,
+				}
 			}
 		}
 
@@ -182,7 +192,6 @@ func worker(jobs <-chan jobStruct, logChan chan logStruct, w *sync.WaitGroup) {
 
 func logWorker(logs <-chan logStruct, logMode int) {
 	for l := range logs {
-		//fmt.Println(l, logMode)
 		switch logMode {
 		case LOG:
 			if l.isError {
