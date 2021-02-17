@@ -203,6 +203,7 @@ func logWorker(logs <-chan logStruct, logMode int) {
 			} else {
 				_, _ = fmt.Fprintf(os.Stdout, l.text)
 			}
+			break
 		}
 	}
 }
