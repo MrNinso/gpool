@@ -16,11 +16,11 @@ import (
 )
 
 const (
-	NULL   = 0
-	LOG    = 1
-	STDOUT = 2
-	STDERR = 3
-	PASS   = 4
+	NULL   uint8 = 0
+	LOG    uint8 = 1
+	STDOUT uint8 = 2
+	STDERR uint8 = 3
+	PASS   uint8 = 4
 )
 
 type logStruct struct {
@@ -190,7 +190,7 @@ func worker(jobs <-chan jobStruct, logChan chan logStruct, w *sync.WaitGroup) {
 	}
 }
 
-func logWorker(logs <-chan logStruct, logMode int) {
+func logWorker(logs <-chan logStruct, logMode uint8) {
 	for l := range logs {
 		switch logMode {
 		case LOG:
