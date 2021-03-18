@@ -21,6 +21,7 @@ const (
 	STDOUT uint8 = 2
 	STDERR uint8 = 3
 	PASS   uint8 = 4
+	ECHO   uint8 = 5
 )
 
 type logStruct struct {
@@ -98,13 +99,15 @@ func main() {
 			logMode = STDERR
 		} else if c.Bool("pass-std") {
 			logMode = PASS
+		} else if echo {
+			logMode = ECHO
 		}
 
 		if workers <= 0 {
 			return errors.New("Must be 1 or more workers")
 		}
 
-		go logWorker(logChan, logMode)
+		go logWorker(logChan, logMode, &w)
 
 		for i := 0; i < workers; i++ {
 			go worker(jobChan, logChan, &w)
@@ -157,6 +160,7 @@ func worker(jobs <-chan jobStruct, logChan chan logStruct, w *sync.WaitGroup) {
 		err := cmd.Run()
 
 		if o := outb.String(); o != "" && o != "<nil>" {
+			w.Add(1)
 			logChan <- logStruct{
 				command: job.command,
 				isError: false,
@@ -166,12 +170,14 @@ func worker(jobs <-chan jobStruct, logChan chan logStruct, w *sync.WaitGroup) {
 
 		if e := errb.String(); (e != "" && e != "<nil>") || err != nil {
 			if err != nil {
+				w.Add(1)
 				logChan <- logStruct{
 					command: job.command,
 					isError: true,
 					text:    fmt.Sprintln(e, err.Error()),
 				}
 			} else {
+				w.Add(1)
 				logChan <- logStruct{
 					command: job.command,
 					isError: true,
@@ -181,16 +187,18 @@ func worker(jobs <-chan jobStruct, logChan chan logStruct, w *sync.WaitGroup) {
 		}
 
 		if job.input != "" {
-			go func() {
-				_, _ = fmt.Fprintln(os.Stdout, job.input)
-			}()
+			w.Add(1)
+			logChan <- logStruct{
+				isError: false,
+				text:    job.input,
+			}
 		}
 
 		w.Done()
 	}
 }
 
-func logWorker(logs <-chan logStruct, logMode uint8) {
+func logWorker(logs <-chan logStruct, logMode uint8, w *sync.WaitGroup) {
 	for l := range logs {
 		switch logMode {
 		case LOG:
@@ -210,9 +218,15 @@ func logWorker(logs <-chan logStruct, logMode uint8) {
 			if l.isError {
 				_, _ = fmt.Fprint(os.Stderr, l.text)
 			} else {
-				_, _ = fmt.Fprintf(os.Stdout, l.text)
+				_, _ = fmt.Fprint(os.Stdout, l.text)
+			}
+			break
+		case ECHO:
+			if l.command == nil {
+				_, _ = fmt.Fprintln(os.Stdout, l.text)
 			}
 			break
 		}
+		w.Done()
 	}
 }
